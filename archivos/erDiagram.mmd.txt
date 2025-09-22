@@ -1,0 +1,198 @@
+erDiagram
+  ALUMNO {
+    int id PK
+    string matricula
+    string expediente
+    string nombre
+    string apellido_paterno
+    string apellido_materno
+    string correo
+    string estado_academico
+    string nivel_ingles_actual
+    int plan_estudio_id FK
+    int total_creditos 
+  }
+
+  PROFESOR {
+    int id PK
+    string nombre
+    string apellido_paterno
+    string apellido_materno
+    string correo
+    int num_empleado
+  }
+
+  PLAN_ESTUDIO {
+    int id PK
+    string nombre
+    string version
+    int total_creditos
+    int semestres_sugeridos
+  }
+
+  MATERIA {
+    int id PK
+    string codigo
+    string nombre
+    int creditos
+    string tipo
+    int plan_estudio_id FK
+  }
+
+  PERIODO {
+    int id PK
+    int anio
+    int ciclo
+    string etiqueta
+    date fecha_inicio
+    date fecha_fin
+  }
+
+  GRUPO {
+    int id PK
+    int materia_id FK
+    int periodo_id FK
+    string clave_grupo
+    int cupo
+  }
+
+  HORARIO {
+    int id PK
+    int grupo_id FK
+    int dia_semana
+    time hora_inicio
+    time hora_fin
+    string aula
+  }
+
+  INSCRIPCION {
+    int id PK
+    int alumno_id FK
+    int grupo_id FK
+    string estatus
+    datetime fecha_alta
+  }
+
+  CALIFICACION {
+    int id PK
+    int inscripcion_id FK
+    decimal ordinario
+    decimal extraordinario
+    decimal final
+    date fecha_cierre
+  }
+
+  ASIGNACION_PROFESOR {
+    int id PK
+    int grupo_id FK
+    int profesor_id FK
+    string rol_docente
+  }
+
+  OPTATIVA_PROGRESO {
+    int id PK
+    int alumno_id FK
+    int creditos_optativos_cursados
+    int creditos_optativos_requeridos
+  }
+
+  KARDEX {
+    int id PK
+    int alumno_id FK
+    int materia_id FK
+    int periodo_id FK
+    decimal calificacion
+    string estatus
+    int promedio_kardex
+    int promedio_sem_act
+  }
+
+  ARCHIVO_CARGADO {
+    int id PK
+    string tipo
+    string nombre_archivo
+    string hash
+    string usuario
+    datetime fecha
+    string estado_proceso
+  }
+
+  VALIDACION_RESULTADO {
+    int id PK
+    int archivo_id FK
+    string severidad
+    string regla_codigo
+    string descripcion
+    string fila_origen
+  }
+
+  AUDITORIA_CARGAS {
+    int id PK
+    int archivo_id FK
+    string etapa
+    string estado
+    datetime timestamp
+    string detalle
+  }
+
+  INCIDENCIA {
+    int id PK
+    int alumno_id FK
+    int profesor_id FK
+    int materia_id FK
+    int grupo_id FK
+    string tipo
+    datetime fecha
+    string descripcion
+  }
+
+  SANCION {
+    int id PK
+    int alumno_id FK
+    int profesor_id FK
+    string regla
+    datetime fecha
+    string detalle
+  }
+
+  %% Núcleo: Plan, Alumno, Materia
+  PLAN_ESTUDIO ||--o{ ALUMNO : sigue
+  PLAN_ESTUDIO ||--o{ MATERIA : incluye
+
+  %% Oferta académica por periodo
+  PERIODO ||--o{ GRUPO : contiene
+  MATERIA ||--o{ GRUPO : se_imparte_como
+  GRUPO ||--o{ HORARIO : tiene
+
+  %% Inscripciones
+  ALUMNO ||--o{ INSCRIPCION : realiza
+  GRUPO ||--o{ INSCRIPCION : recibe
+  %% Recomendado (añadir FK): INSCRIPCION.periodo_id -> PERIODO.id
+  PERIODO ||--o{ INSCRIPCION : corresponde
+
+  %% Calificaciones (1:1 por inscripción)
+  INSCRIPCION ||--|| CALIFICACION : genera
+  %% Nota: Materia↔Calificación se infiere vía Inscripcion→Grupo→Materia
+
+  %% Asignación docente
+  GRUPO ||--o{ ASIGNACION_PROFESOR : asignacion
+  PROFESOR ||--o{ ASIGNACION_PROFESOR : dicta
+
+  %% Progreso y Kardex
+  ALUMNO ||--o{ OPTATIVA_PROGRESO : progreso
+  ALUMNO ||--o{ KARDEX : registra
+  MATERIA ||--o{ KARDEX : cursada
+  PERIODO ||--o{ KARDEX : periodo
+
+  %% Cargas y validaciones
+  ARCHIVO_CARGADO ||--o{ VALIDACION_RESULTADO : produce
+  ARCHIVO_CARGADO ||--o{ AUDITORIA_CARGAS : audita
+
+  %% Incidencias y sanciones
+  ALUMNO ||--o{ INCIDENCIA : involucra
+  PROFESOR ||--o{ INCIDENCIA : involucra
+  MATERIA ||--o{ INCIDENCIA : sobre
+  GRUPO ||--o{ INCIDENCIA : en
+
+  ALUMNO ||--o{ SANCION : recibe
+  PROFESOR ||--o{ SANCION : impone
