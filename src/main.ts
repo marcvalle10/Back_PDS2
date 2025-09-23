@@ -382,6 +382,315 @@ async function bootstrap() {
     }
   });
 
+  // GET /plan-estudio/:id/materias?tipo=OBLIGATORIA|OPTATIVA
+app.get('/plan-estudio/:id/materias', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tipo } = req.query as { tipo?: 'OBLIGATORIA' | 'OPTATIVA' };
+
+    const qb = R(Materia).createQueryBuilder('m')
+      .where('m.plan_estudio_id = :id', { id: +id });
+
+    if (tipo) qb.andWhere('m.tipo = :tipo', { tipo });
+
+    const data = await qb.orderBy('m.codigo', 'ASC').getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error listando materias del plan' });
+  }
+});
+// GET /periodo/actual
+app.get('/periodo/actual', async (_req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const data = await R(Periodo).createQueryBuilder('p')
+      .where('p.fecha_inicio <= :hoy', { hoy: today })
+      .andWhere('p.fecha_fin >= :hoy', { hoy: today })
+      .orderBy('p.anio', 'DESC').addOrderBy('p.ciclo', 'DESC')
+      .getOne();
+    data ? res.json(data) : res.status(404).json({ error: 'No hay periodo activo hoy' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error consultando periodo actual' });
+  }
+});
+
+// GET /periodo/proximos?n=3
+app.get('/periodo/proximos', async (req, res) => {
+  try {
+    const n = Number((req.query.n as string) || 3);
+    const today = new Date().toISOString().slice(0, 10);
+    const data = await R(Periodo).createQueryBuilder('p')
+      .where('p.fecha_inicio > :hoy', { hoy: today })
+      .orderBy('p.fecha_inicio', 'ASC')
+      .limit(n)
+      .getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error consultando próximos periodos' });
+  }
+});
+// GET /alumno/:id/kardex/por-periodo/:etiqueta
+app.get('/alumno/:id/kardex/por-periodo/:etiqueta', async (req, res) => {
+  try {
+    const { id, etiqueta } = req.params;
+    const data = await R(Kardex).createQueryBuilder('k')
+      .leftJoinAndSelect('k.materia', 'm')
+      .leftJoinAndSelect('k.periodo', 'p')
+      .where('k.alumno_id = :id', { id: +id })
+      .andWhere('p.etiqueta = :et', { et: etiqueta })
+      .orderBy('m.codigo', 'ASC')
+      .getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error filtrando kardex por periodo' });
+  }
+});
+// GET /alumno/:id/creditos-por-tipo
+app.get('/alumno/:id/creditos-por-tipo', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Créditos aprobados OBLIGATORIAS
+    const obl = await R(Kardex).createQueryBuilder('k')
+      .select('COALESCE(SUM(m.creditos),0)', 'sum')
+      .leftJoin('k.materia', 'm')
+      .where('k.alumno_id = :id', { id: +id })
+      .andWhere("k.estatus ILIKE 'ACREDIT%'")
+      .andWhere("m.tipo = 'OBLIGATORIA'")
+      .getRawOne<{ sum: string }>();
+
+    // Créditos aprobados OPTATIVAS
+    const opt = await R(Kardex).createQueryBuilder('k')
+      .select('COALESCE(SUM(m.creditos),0)', 'sum')
+      .leftJoin('k.materia', 'm')
+      .where('k.alumno_id = :id', { id: +id })
+      .andWhere("k.estatus ILIKE 'ACREDIT%'")
+      .andWhere("m.tipo = 'OPTATIVA'")
+      .getRawOne<{ sum: string }>();
+
+    res.json({
+      alumno_id: +id,
+      obligatorias_aprobadas: Number(obl?.sum ?? 0),
+      optativas_aprobadas: Number(opt?.sum ?? 0),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error calculando créditos por tipo' });
+  }
+});
+// GET /alumno/:id/avance-optativas
+app.get('/alumno/:id/avance-optativas', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // lo que lleva en optativas (por Kardex)
+    const kOpt = await R(Kardex).createQueryBuilder('k')
+      .select('COALESCE(SUM(m.creditos),0)', 'sum')
+      .leftJoin('k.materia', 'm')
+      .where('k.alumno_id = :id', { id: +id })
+      .andWhere("k.estatus ILIKE 'ACREDIT%'")
+      .andWhere("m.tipo = 'OPTATIVA'")
+      .getRawOne<{ sum: string }>();
+
+    // lo que requiere según optativa_progreso (si existe fila)
+    const prog = await R(OptativaProgreso).findOne({
+      where: { alumno_id: +id } as any,
+    });
+
+    res.json({
+      alumno_id: +id,
+      creditos_optativos_cursados: Number(kOpt?.sum ?? 0),
+      creditos_optativos_requeridos: prog?.creditos_optativos_requeridos ?? 0,
+      restante: Math.max(0, (prog?.creditos_optativos_requeridos ?? 0) - Number(kOpt?.sum ?? 0)),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error consultando avance de optativas' });
+  }
+});
+// GET /materia/:codigo/grupos?periodo=2025-1
+app.get('/materia/:codigo/grupos', async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    const { periodo } = req.query as { periodo?: string };
+
+    const qb = R(Grupo).createQueryBuilder('g')
+      .leftJoinAndSelect('g.materia', 'm')
+      .leftJoinAndSelect('g.periodo', 'p')
+      .where('m.codigo = :codigo', { codigo });
+
+    if (periodo) qb.andWhere('p.etiqueta = :per', { per: periodo });
+
+    const data = await qb.orderBy('g.clave_grupo', 'ASC').getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error listando grupos por materia' });
+  }
+});
+// GET /alumno/buscar?q=marco&p=1&limit=20
+app.get('/alumno/buscar', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const p = Math.max(1, Number(req.query.p || 1));
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
+    const qb = R(Alumno).createQueryBuilder('a');
+
+    if (q) {
+      qb.where(`(a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q OR a.apellido_materno ILIKE :q OR a.matricula ILIKE :q)`, { q: `%${q}%` });
+    }
+
+    qb.orderBy('a.apellido_paterno', 'ASC')
+      .addOrderBy('a.apellido_materno', 'ASC')
+      .addOrderBy('a.nombre', 'ASC')
+      .skip((p - 1) * limit)
+      .take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+    res.json({ total, p, limit, data });
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error buscando alumnos' });
+  }
+});
+// GET /materia/buscar?q=prog&tipo=OBLIGATORIA&p=1&limit=20
+app.get('/materia/buscar', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const tipo = req.query.tipo as 'OBLIGATORIA'|'OPTATIVA'|undefined;
+    const p = Math.max(1, Number(req.query.p || 1));
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
+
+    const qb = R(Materia).createQueryBuilder('m');
+    if (q) qb.where('(m.codigo ILIKE :q OR m.nombre ILIKE :q)', { q: `%${q}%` });
+    if (tipo) qb.andWhere('m.tipo = :t', { t: tipo });
+
+    qb.orderBy('m.codigo', 'ASC').skip((p - 1) * limit).take(limit);
+    const [data, total] = await qb.getManyAndCount();
+    res.json({ total, p, limit, data });
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error buscando materias' });
+  }
+});
+// GET /alumno/:id/inscripciones/por-periodo/:etiqueta
+app.get('/alumno/:id/inscripciones/por-periodo/:etiqueta', async (req, res) => {
+  try {
+    const { id, etiqueta } = req.params;
+    const data = await R(Inscripcion).createQueryBuilder('i')
+      .leftJoinAndSelect('i.periodo', 'p')
+      .where('i.alumno_id = :id', { id: +id })
+      .andWhere('p.etiqueta = :et', { et: etiqueta })
+      .getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error consultando inscripciones del periodo' });
+  }
+});
+// POST /kardex/crear  { alumno_id, materia_id, periodo_id, estatus, calificacion? }
+app.post('/kardex/crear', async (req, res) => {
+  try {
+    const { alumno_id, materia_id, periodo_id, estatus, calificacion } = req.body as {
+      alumno_id: number; materia_id: number; periodo_id: number; estatus: string; calificacion?: number;
+    };
+
+    const k = R(Kardex).create({
+      alumno_id, materia_id, periodo_id,
+      estatus,
+      calificacion: calificacion ?? null,
+    } as any);
+    const saved = await R(Kardex).save(k);
+    res.status(201).json(saved);
+  } catch (e:any) {
+    console.error(e); res.status(400).json({ error: e?.detail || 'Error creando renglón de kardex' });
+  }
+});
+// GET /alumno/:id/kardex/materia/:materiaId
+app.get('/alumno/:id/kardex/materia/:materiaId', async (req, res) => {
+  try {
+    const { id, materiaId } = req.params;
+    const data = await R(Kardex).createQueryBuilder('k')
+      .leftJoinAndSelect('k.materia', 'm')
+      .leftJoinAndSelect('k.periodo', 'p')
+      .where('k.alumno_id = :id', { id: +id })
+      .andWhere('k.materia_id = :m', { m: +materiaId })
+      .orderBy('p.anio', 'DESC').addOrderBy('p.ciclo', 'DESC')
+      .getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error consultando historial de materia' });
+  }
+});
+// GET /profesor/by-num/:num_empleado
+app.get('/profesor/by-num/:num_empleado', async (req, res) => {
+  try {
+    const pr = await R(Profesor).findOne({ where: { num_empleado: +req.params.num_empleado } as any });
+    pr ? res.json(pr) : res.status(404).json({ error: 'Profesor no encontrado' });
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error buscando profesor' });
+  }
+});
+
+// GET /profesor/:id/grupos?periodo=2025-1
+app.get('/profesor/:id/grupos', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { periodo } = req.query as { periodo?: string };
+    const qb = R(AsignacionProfesor).createQueryBuilder('ap')
+      .leftJoinAndSelect('ap.grupo', 'g')
+      .leftJoinAndSelect('g.materia', 'm')
+      .leftJoinAndSelect('g.periodo', 'p')
+      .where('ap.profesor_id = :id', { id: +id });
+
+    if (periodo) qb.andWhere('p.etiqueta = :per', { per: periodo });
+
+    const data = await qb.orderBy('m.codigo', 'ASC').getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error listando grupos del profesor' });
+  }
+});
+// GET /grupo/by-clave/:clave/horario
+app.get('/grupo/by-clave/:clave/horario', async (req, res) => {
+  try {
+    const g = await R(Grupo).findOne({ where: { clave_grupo: req.params.clave } as any });
+    if (!g) return res.status(404).json({ error: 'Grupo no encontrado' });
+    const data = await R(Horario).find({ where: { grupo_id: (g as any).id } as any });
+    res.json(data);
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error consultando horario por clave' });
+  }
+});
+// GET /archivo/:id/validaciones/por-severidad/:sev  (sev=INFO|WARNING|ERROR)
+app.get('/archivo/:id/validaciones/por-severidad/:sev', async (req, res) => {
+  try {
+    const { id, sev } = req.params;
+    const v = await R(ValidacionResultado).find({
+      where: { archivo_id: +id, severidad: sev as any } as any,
+    });
+    res.json(v);
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error filtrando validaciones' });
+  }
+});
+// GET /sancion/buscar?alumno_id=1&profesor_id=2&desde=2025-01-01&hasta=2025-12-31
+app.get('/sancion/buscar', async (req, res) => {
+  try {
+    const { alumno_id, profesor_id, desde, hasta } = req.query as any;
+    const qb = R(Sancion).createQueryBuilder('s');
+    if (alumno_id) qb.andWhere('s.alumno_id = :a', { a: +alumno_id });
+    if (profesor_id) qb.andWhere('s.profesor_id = :p', { p: +profesor_id });
+    if (desde) qb.andWhere('s.fecha >= :d', { d: desde });
+    if (hasta) qb.andWhere('s.fecha <= :h', { h: hasta });
+    const data = await qb.orderBy('s.fecha', 'DESC').getMany();
+    res.json(data);
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error consultando sanciones' });
+  }
+});
+
   // 7) Levantar server
   const PORT = Number(process.env.PORT || 3000);
   app.listen(PORT, () => console.log(`🚀 Server listo en http://localhost:${PORT}`));
