@@ -1,0 +1,12 @@
+export * as QAlumno from "./alumno.query";
+export * as QMateria from "./materia.query";
+export * as QProfesor from "./profesor.query";
+export * as QKardex from "./kardex.query";
+export * as QCalif from "./calificacion.query";
+export * as QArchivo from "./archivo.query";
+export * as QSancion from "./sancion.query";
+export * as QPeriodo from "./periodo.query";
+export * as QGrupo from "./grupo.query";
+export * as QInscripcion from "./inscripcion.query";
+export * as QPlan from "./planEstudio.query";
+export { repo } from "./common";
