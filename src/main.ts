@@ -222,8 +222,6 @@ app.post('/inscripcion/crear', async (req,res)=>{
   catch(e:any){ console.error(e); res.status(400).json({error: e?.message || 'Error creando inscripción'}); }
 });
 
-// Calificar kardex (ya migrado a QCalif.upsertCalificacion) -> si prefieres mantener la ruta actual, ok
-
 // Auditoría / Validaciones
 app.get('/archivo/:id/validaciones', async (req,res)=>{
   try { res.json(await QArchivo.getValidaciones(ds, +req.params.id)); }
@@ -315,7 +313,7 @@ app.get('/profesor/:id/grupos', async (req,res)=>{
 });
 
 // Grupo por clave → horario
-app.get('/grupo/by-clave/:clave/horario', async (req,res)=>{
+app.get('/grupo/:clave/horario', async (req,res)=>{
   try {
     const rows = await QGrupo.horariosByClave(ds, req.params.clave);
     if (rows === null) return res.status(404).json({error:'Grupo no encontrado'});
