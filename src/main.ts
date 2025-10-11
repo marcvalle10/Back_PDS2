@@ -31,6 +31,9 @@ import {
   Sancion,
   Horario, // 👈 IMPORTANTE
 } from './entities';
+import archivoCargasRouter from './routes/archivoCargas.router';
+import alumnoRouter from './routes/alumno.router';
+import { getHorarioActualAlumno } from './usecases/horario.controllers';
 
 async function bootstrap() {
   // 1) Inicializa la BD
@@ -333,6 +336,10 @@ app.get('/sancion/buscar', async (req,res)=>{
     res.json(data);
   } catch(e){ console.error(e); res.status(500).json({error:'Error consultando sanciones'}); }
 });
+
+app.use('/archivo-cargas', archivoCargasRouter);
+app.use('/alumno', alumnoRouter);
+app.get('/alumno/:id/horario-actual', getHorarioActualAlumno);
 
   // 7) Levantar server
   const PORT = Number(process.env.PORT || 3000);
